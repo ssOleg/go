@@ -1,150 +1,20 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
-	"net/http"
-	"io/ioutil"
-	"os"
 	"gopkg.in/mgo.v2"
-	"fmt"
+	"flag"
+	"os"
 	"gopkg.in/mgo.v2/bson"
-	"os/signal"
-	"syscall"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-	"flag"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"log"
 	"strings"
-	"context"
 )
 
-type Element struct {
-	Id    string `bson:"id" json:"id"`
-	Url   string `bson:"url" json:"url"`
-	Title string `bson:"title" json:"title"`
-}
-
-type Results struct {
-	Data []Element `json:"data"`
-}
-
 var gifs Results
-
-func Ctx(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gifID := chi.URLParam(r, "gifID")
-
-		var element Element
-		err := db.C(COLLECTION).Find(bson.M{"id": gifID}).One(&element)
-		if err != nil {
-			http.Error(w, http.StatusText(404), 404)
-			return
-		}
-		ctx := context.WithValue(r.Context(), "gif", element)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// Get items
-func getGifs(w http.ResponseWriter, r *http.Request) {
-	var elements []Element
-	err := db.C(COLLECTION).Find(bson.M{}).All(&elements)
-	check(err)
-	json.NewEncoder(w).Encode(Results{elements})
-}
-
-// Get an item
-func getGif(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	element, true := ctx.Value("gif").(Element)
-	log.Println(element)
-	if !true {
-		http.Error(w, http.StatusText(422), 422)
-		return
-	}
-	json.NewEncoder(w).Encode(element)
-}
-
-// Create a new item
-func createGifs(w http.ResponseWriter, r *http.Request) {
-	var element Element
-	err := json.NewDecoder(r.Body).Decode(&element)
-	check(err)
-	if element == (Element{}) {
-		json.NewEncoder(w).Encode("Please use correct format")
-		return
-	}
-	db.C(COLLECTION).Insert(&element)
-	json.NewEncoder(w).Encode(element)
-}
-
-// Delete an item
-func deleteGif(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	element, true := ctx.Value("gif").(Element)
-	if !true {
-		http.Error(w, http.StatusText(422), 422)
-		return
-	}
-
-	err := db.C(COLLECTION).Remove(element)
-	check(err)
-	json.NewEncoder(w).Encode("Element was deleted")
-}
-
-func loadData() Results {
-	var s = new(Results)
-	body, err := ioutil.ReadFile("data_gif")
-	if err != nil {
-		os.Exit(1)
-	}
-	json.Unmarshal(body, &s)
-	return *s
-}
-
-func insertInitialData() {
-	gifs = loadData()
-	for _, element := range gifs.Data {
-		err := db.C(COLLECTION).Insert(element)
-		check(err)
-	}
-}
-
-func connectToDB() *mgo.Session {
-	session, err := mgo.Dial("localhost")
-	if err != nil {
-		fmt.Println("Hello it is an error occured:", err)
-		os.Exit(1)
-	}
-	session.SetMode(mgo.Monotonic, true)
-	// Error check on every access
-	session.SetSafe(&mgo.Safe{})
-
-	return session
-}
-
-func check(e error) {
-	if e != nil {
-		//TODO: Add better logging
-		log.Fatal(e)
-		os.Exit(0)
-	}
-}
-
-func saveData() {
-	var elements []Element
-	err := db.C(COLLECTION).Find(bson.M{}).All(&elements)
-	check(err)
-	res := Results{elements}
-
-	f, err := os.Create("data_gifs")
-	check(err)
-	fmt.Println("Store data.")
-	b, err := json.Marshal(res)
-	f.Write(b)
-
-	defer f.Close()
-}
 
 var db *mgo.Database
 
@@ -162,9 +32,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	session := connectToDB()
+	session := connectToDB(DB{connectionPoint: "localhost"})
 	defer session.Close()
 	db = session.DB("testDB")
+
 	//Remove old data from DB
 	db.C(COLLECTION).RemoveAll(bson.M{})
 
